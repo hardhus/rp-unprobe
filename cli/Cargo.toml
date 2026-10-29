@@ -1,0 +1,21 @@
+[package]
+name = "unprobe-cli"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Host tool for rp-unprobe: flash RP2040/RP2350 over BOOTSEL without a button and stream the USB log"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/hardhus/rp-unprobe"
+readme = "../README.md"
+keywords = ["rp2350", "rp2040", "pico", "uf2", "cargo-runner"]
+categories = ["embedded", "command-line-utilities"]
+
+[[bin]]
+name = "unprobe"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+object = { version = "0.36", default-features = false, features = ["read_core", "elf", "std"] }
+serialport = { version = "4.7", default-features = false, features = ["usbportinfo-interface"] }

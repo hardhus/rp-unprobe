@@ -1,0 +1,49 @@
+[package]
+name = "rp-unprobe"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Probe-less development for RP2040/RP2350: USB serial logging, panic capture and BOOTSEL reboot in debug builds, zero cost in release"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/hardhus/rp-unprobe"
+readme = "README.md"
+keywords = ["rp2350", "rp2040", "pico", "embassy", "logging"]
+categories = ["embedded", "no-std"]
+
+# The lib only builds for an RP chip; embassy-rp needs a chip feature (the app normally picks it).
+[package.metadata.docs.rs]
+default-target = "thumbv8m.main-none-eabihf"
+targets = ["thumbv8m.main-none-eabihf"]
+features = ["embassy-rp/rp235xa"]
+
+[lib]
+name = "unprobe"
+
+# Debug builds (debug_assertions): log over USB CDC-ACM serial.
+# Release builds: every macro becomes a no-op and nothing ends up in the binary.
+#
+# The chip feature for embassy-rp (rp235xa, rp2040, ...) is chosen by the application.
+[features]
+default = ["panic-handler", "bootsel-touch"]
+# Provides #[panic_handler]. Debug: saves the message, resets, prints it on the next boot.
+# Release: halts like panic-halt. Turn it off to bring your own handler.
+panic-handler = []
+# Opening the port at 1200 baud reboots the board into BOOTSEL (used by `unprobe run`).
+bootsel-touch = []
+
+[dependencies]
+embassy-executor = "0.9"
+embassy-rp = "0.10"
+embassy-sync = "0.8"
+embassy-usb = "0.6"
+heapless = "0.8"
+log = "0.4.22"
+static_cell = "2.1.1"
+
+[target.'cfg(target_arch = "arm")'.dependencies]
+cortex-m = "0.7"
+
+[workspace]
+members = ["cli"]
+# A plain `cargo build` here builds the host CLI; the lib is built by the firmware that uses it.
+default-members = ["cli"]
