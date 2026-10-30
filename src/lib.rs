@@ -6,11 +6,15 @@
 //! - **Logging over USB serial** with the usual `info!`, `warn!`, `error!`, `debug!`, `trace!`.
 //! - **Panic capture:** the message survives a reset and is printed on the next boot.
 //!   The firmware then halts there instead of running again, like stopping at a breakpoint.
+//! - **HardFault and stack overflow capture:** reported the same way, with the source line
+//!   (the CLI looks it up). On the RP2350 the stack limit register turns a stack overflow
+//!   into a fault instead of silent memory corruption, like flip-link.
+//! - **Stack usage:** [`stack_usage`] tells how deep the stack has been so far.
 //! - **Flashing without the BOOTSEL button:** the `unprobe` CLI opens the port at 1200 baud
 //!   and the board reboots into BOOTSEL by itself.
 //!
-//! In a **release** build all of this disappears: no USB stack, no logger, no format strings.
-//! The binary contains the same functions as one built without `unprobe` (the panic handler
+//! In a **release** build all of this disappears: no USB stack, no logger, no format strings,
+//! no fault handler. The binary is the same as one built without `unprobe` (the panic handler
 //! behaves exactly like `panic-halt`).
 //!
 //! # Usage
@@ -36,18 +40,22 @@
 //!
 //! `cargo run` then flashes the board and streams the log into the terminal.
 //!
-//! [`init!`] needs an async context: if the previous boot panicked, it prints the report
-//! and never returns, so the application does not run again until you reflash or replug.
+//! [`init!`] needs an async context: if the previous boot panicked or faulted, it prints the
+//! report and never returns, so the application does not run again until you reflash or replug.
 //!
-//! ## Device identity and log level
+//! ## Device identity, log level and format
 //!
 //! ```ignore
 //! unprobe::init!(spawner, p.USB, unprobe::Config {
 //!     product: "My Board",
 //!     level: log::LevelFilter::Info,
+//!     format: unprobe::Format::Detailed, // or Format::Custom(your_fn)
 //!     ..unprobe::Config::new()
 //! });
 //! ```
+//!
+//! The log buffer is 2048 bytes; set `UNPROBE_BUFFER_SIZE` in the `[env]` section of your
+//! `.cargo/config.toml` to change it.
 //!
 //! If you change the VID/PID, pass them to the CLI too: `unprobe run --vid 1234 --pid 5678`.
 //!
@@ -67,10 +75,12 @@
 //!
 //! # Cargo features
 //!
-//! Both are on by default. With `default-features = false`, only the logger is left.
+//! All are on by default. With `default-features = false`, only the logger is left.
 //!
 //! - `panic-handler`: provides the `#[panic_handler]`. Turn it off to use your own
 //!   (for example `panic-halt` or `panic-probe`).
+//! - `hardfault-handler`: provides the `HardFault` handler and, on the RP2350, the stack
+//!   limit. Turn it off to use your own `#[exception] fn HardFault`.
 //! - `bootsel-touch`: opening the port at 1200 baud reboots the board into BOOTSEL.
 //!   Without it, you have to press the button for every flash.
 //!
@@ -85,12 +95,19 @@
 //!   `cargo build --release`).
 //! - The chip feature of `embassy-rp` (`rp235xa`, `rp2040`, ...) is chosen by your application.
 
+#[cfg(all(debug_assertions, feature = "hardfault-handler", target_arch = "arm"))]
+mod fault;
 #[cfg(debug_assertions)]
 mod logger;
 #[cfg(feature = "panic-handler")]
 mod panic;
+#[cfg(all(debug_assertions, target_arch = "arm"))]
+mod stack;
+mod uptime;
 #[cfg(debug_assertions)]
 mod usb;
+
+pub use uptime::{Uptime, uptime};
 
 #[cfg(debug_assertions)]
 pub use log::{debug, error, info, trace, warn};
@@ -111,6 +128,62 @@ pub struct Config {
     pub product: &'static str,
     /// Most verbose level that is sent. Default [`log::LevelFilter::Trace`].
     pub level: log::LevelFilter,
+    /// How a log line looks. Default [`Format::Plain`].
+    pub format: Format,
+    /// Fill the unused stack with a pattern at start, so [`stack_usage`] can measure it.
+    /// Default `true`. Turn it off if something else lives in that RAM, e.g. a heap that
+    /// starts at `cortex_m_rt::heap_start()`.
+    pub measure_stack: bool,
+}
+
+/// Formats one log line (without the line ending). See [`Format::Custom`].
+pub type FormatFn = fn(&mut dyn core::fmt::Write, &log::Record) -> core::fmt::Result;
+
+/// How a log line looks. Only used in debug builds.
+#[derive(Clone, Copy)]
+pub enum Format {
+    /// `[INFO] message`
+    Plain,
+    /// The time since boot ([`uptime`]), level, message, and where it was logged:
+    /// ```text
+    /// 1.234567 INFO  message
+    /// └─ blinky @ src/main.rs:23
+    /// ```
+    Detailed,
+    /// Your own function. It may write several lines (separate them with `"\r\n"`).
+    ///
+    /// ```ignore
+    /// fn my_format(w: &mut dyn core::fmt::Write, r: &log::Record) -> core::fmt::Result {
+    ///     write!(w, "{} {} {}", unprobe::uptime().as_millis(), r.level(), r.args())
+    /// }
+    /// ```
+    Custom(FormatFn),
+}
+
+/// How much of the stack was used so far (the deepest point), see [`stack_usage`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StackUsage {
+    /// Bytes used at the deepest point so far.
+    pub used: usize,
+    /// Bytes available in total.
+    pub size: usize,
+}
+
+impl core::fmt::Display for StackUsage {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{} of {} bytes", self.used, self.size)
+    }
+}
+
+/// The deepest the stack has been since boot: `info!("stack: {}", unprobe::stack_usage().unwrap())`.
+///
+/// `None` in release builds, before `init!`, with [`Config::measure_stack`] off, or with an
+/// unusual stack layout. It scans the unused stack, which takes about a millisecond.
+pub fn stack_usage() -> Option<StackUsage> {
+    #[cfg(all(debug_assertions, target_arch = "arm"))]
+    return stack::usage();
+    #[cfg(not(all(debug_assertions, target_arch = "arm")))]
+    None
 }
 
 impl Config {
@@ -122,6 +195,8 @@ impl Config {
             manufacturer: "unprobe",
             product: "unprobe console",
             level: log::LevelFilter::Trace,
+            format: Format::Plain,
+            measure_stack: true,
         }
     }
 }
@@ -153,14 +228,16 @@ pub mod __private {
 
     use core::sync::atomic::{AtomicBool, Ordering};
 
-    /// The previous boot ended in a panic: the app must not run again.
+    /// The previous boot ended in a panic or HardFault: the app must not run again.
     pub(crate) static PANICKED: AtomicBool = AtomicBool::new(false);
     /// USB and the logger are fully set up (a panic can be reported over USB).
     /// Starts out false on every boot (.bss).
     pub(crate) static USB_UP: AtomicBool = AtomicBool::new(false);
 
     fn start(spawner: Spawner, class: CdcAcmClass<'static, Driver<'static, USB>>, config: Config) {
-        let report = panic_report();
+        #[cfg(target_arch = "arm")]
+        crate::stack::setup(config.measure_stack);
+        let report = panic_report().or_else(fault_report);
         PANICKED.store(report.is_some(), Ordering::Relaxed);
         let (sender, receiver, control) = class.split_with_control();
         spawner
@@ -169,7 +246,7 @@ pub mod __private {
         spawner
             .spawn(crate::logger::log_task(sender, report))
             .unwrap();
-        if crate::logger::init_logger(config.level).is_err() {
+        if crate::logger::init_logger(config.level, config.format).is_err() {
             // Not a panic: that would happen again on every boot.
             crate::logger::notice(
                 "[unprobe] another logger is already installed (log::set_logger); log output goes there, not to USB",
@@ -189,7 +266,17 @@ pub mod __private {
         None
     }
 
-    /// Never returns if the previous boot panicked; USB (log + BOOTSEL) keeps running.
+    #[cfg(all(feature = "hardfault-handler", target_arch = "arm"))]
+    fn fault_report() -> Option<crate::logger::Report> {
+        crate::fault::take_report()
+    }
+
+    #[cfg(not(all(feature = "hardfault-handler", target_arch = "arm")))]
+    fn fault_report() -> Option<crate::logger::Report> {
+        None
+    }
+
+    /// Never returns if the previous boot panicked or faulted; USB (log + BOOTSEL) keeps running.
     pub async fn halt_if_panicked() {
         if PANICKED.load(Ordering::Relaxed) {
             core::future::pending::<()>().await;

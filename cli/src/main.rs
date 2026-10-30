@@ -1,9 +1,11 @@
 mod drive;
+mod output;
 mod serial;
 mod uf2;
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
+use output::Output;
 use serial::Device;
 use std::path::PathBuf;
 use std::thread::sleep;
@@ -30,6 +32,8 @@ enum Cmd {
         family: Option<u32>,
         #[command(flatten)]
         dev: DeviceArgs,
+        #[command(flatten)]
+        log: LogArgs,
         /// Extra arguments cargo passes after the ELF (ignored)
         #[arg(trailing_var_arg = true, hide = true)]
         _rest: Vec<String>,
@@ -38,6 +42,11 @@ enum Cmd {
     Monitor {
         #[command(flatten)]
         dev: DeviceArgs,
+        #[command(flatten)]
+        log: LogArgs,
+        /// ELF of the running firmware, to show source locations in a HardFault report
+        #[arg(long)]
+        elf: Option<PathBuf>,
     },
     /// Reboot a running rp-unprobe firmware into BOOTSEL
     Reboot {
@@ -48,7 +57,7 @@ enum Cmd {
     Uf2 {
         elf: PathBuf,
         out: Option<PathBuf>,
-        /// UF2 family ID (default: RP2350 ARM-S, or RISC-V for RISC-V ELFs)
+        /// UF2 family ID (default: RP2350 ARM-S, or RISC-V for RISC-V ELFs; RP2040: e48bff56)
         #[arg(long, value_parser = parse_hex32)]
         family: Option<u32>,
     },
@@ -65,6 +74,15 @@ struct DeviceArgs {
     /// How long to wait for the BOOTSEL drive / serial port (seconds)
     #[arg(long, default_value_t = 10)]
     timeout: u64,
+}
+
+#[derive(Args)]
+struct LogArgs {
+    /// Prefix each line with the host's local time. Optional strftime format,
+    /// e.g. --timestamp="%Y-%m-%d %H:%M:%S" (default "%H:%M:%S%.3f")
+    #[arg(long, value_name = "FORMAT", num_args = 0..=1, require_equals = true,
+          default_missing_value = output::DEFAULT_TIME_FORMAT, value_parser = output::parse_time_format)]
+    timestamp: Option<String>,
 }
 
 impl DeviceArgs {
@@ -123,7 +141,13 @@ fn reboot(dev: &DeviceArgs) -> Result<drive::BootDrive> {
     }
 }
 
-fn run(elf: PathBuf, no_monitor: bool, family: Option<u32>, dev: DeviceArgs) -> Result<()> {
+fn run(
+    elf: PathBuf,
+    no_monitor: bool,
+    family: Option<u32>,
+    dev: DeviceArgs,
+    log: LogArgs,
+) -> Result<()> {
     let data = std::fs::read(&elf).with_context(|| format!("can't read {}", elf.display()))?;
 
     let drive = match drive::find() {
@@ -134,7 +158,7 @@ fn run(elf: PathBuf, no_monitor: bool, family: Option<u32>, dev: DeviceArgs) -> 
 
     let family = match family {
         Some(f) => f,
-        None => uf2::family_for(&data, &drive.model)?,
+        None => uf2::family_for(&data, drive.rp2040)?,
     };
     let image = uf2::convert(&data, family)?;
     eprintln!(
@@ -159,7 +183,8 @@ fn run(elf: PathBuf, no_monitor: bool, family: Option<u32>, dev: DeviceArgs) -> 
         return Ok(());
     }
     eprintln!("Waiting for USB serial log...");
-    if !serial::monitor(dev.device(), dev.timeout())? {
+    let mut out = Output::new(log.timestamp, Some(elf));
+    if !serial::monitor(dev.device(), dev.timeout(), &mut out)? {
         eprintln!("No serial port appeared (release build, or a firmware without rp-unprobe).");
     }
     Ok(())
@@ -172,11 +197,13 @@ fn main() -> Result<()> {
             no_monitor,
             family,
             dev,
+            log,
             ..
-        } => run(elf, no_monitor, family, dev),
-        Cmd::Monitor { dev } => {
+        } => run(elf, no_monitor, family, dev, log),
+        Cmd::Monitor { dev, log, elf } => {
             eprintln!("Waiting for USB serial log...");
-            serial::monitor(dev.device(), Duration::MAX)?;
+            let mut out = Output::new(log.timestamp, elf);
+            serial::monitor(dev.device(), Duration::MAX, &mut out)?;
             Ok(())
         }
         Cmd::Reboot { dev } => {
@@ -188,7 +215,7 @@ fn main() -> Result<()> {
             let data = std::fs::read(&elf)?;
             let family = match family {
                 Some(f) => f,
-                None => uf2::family_for(&data, "RP2350")?,
+                None => uf2::family_for(&data, false)?,
             };
             let out = out.unwrap_or_else(|| elf.with_extension("uf2"));
             std::fs::write(&out, uf2::convert(&data, family)?)?;

@@ -1,6 +1,6 @@
 [package]
 name = "rp-unprobe"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Probe-less development for RP2040/RP2350: USB serial logging, panic capture and BOOTSEL reboot in debug builds, zero cost in release"
@@ -24,10 +24,14 @@ name = "unprobe"
 #
 # The chip feature for embassy-rp (rp235xa, rp2040, ...) is chosen by the application.
 [features]
-default = ["panic-handler", "bootsel-touch"]
+default = ["panic-handler", "hardfault-handler", "bootsel-touch"]
 # Provides #[panic_handler]. Debug: saves the message, resets, prints it on the next boot.
 # Release: halts like panic-halt. Turn it off to bring your own handler.
 panic-handler = []
+# Provides the HardFault handler. Debug: reports the fault (and, on the RP2350, a stack
+# overflow) on the next boot like a panic. Release: cortex-m-rt's default handler.
+# Turn it off to use your own `#[exception] fn HardFault`.
+hardfault-handler = []
 # Opening the port at 1200 baud reboots the board into BOOTSEL (used by `unprobe run`).
 bootsel-touch = []
 

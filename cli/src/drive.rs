@@ -7,6 +7,8 @@ pub struct BootDrive {
     pub root: PathBuf,
     /// The `Model:` line, e.g. "Raspberry Pi RP2350"
     pub model: String,
+    /// The RP2040 boot ROM calls itself "Raspberry Pi RP2" / "RPI-RP2", without "2040".
+    pub rp2040: bool,
 }
 
 fn candidates() -> Vec<PathBuf> {
@@ -35,7 +37,8 @@ fn candidates() -> Vec<PathBuf> {
 pub fn find() -> Option<BootDrive> {
     candidates().into_iter().find_map(|root| {
         let info = fs::read_to_string(root.join("INFO_UF2.TXT")).ok()?;
-        if !(info.contains("RP2350") || info.contains("RP2040")) {
+        let rp2040 = info.contains("RPI-RP2") || info.contains("RP2040");
+        if !(rp2040 || info.contains("RP2350")) {
             return None;
         }
         let model = info
@@ -44,6 +47,10 @@ pub fn find() -> Option<BootDrive> {
             .unwrap_or("")
             .trim()
             .to_string();
-        Some(BootDrive { root, model })
+        Some(BootDrive {
+            root,
+            model,
+            rp2040,
+        })
     })
 }

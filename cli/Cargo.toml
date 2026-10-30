@@ -1,6 +1,6 @@
 [package]
 name = "unprobe-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Host tool for rp-unprobe: flash RP2040/RP2350 over BOOTSEL without a button and stream the USB log"
@@ -15,7 +15,10 @@ name = "unprobe"
 path = "src/main.rs"
 
 [dependencies]
+addr2line = { version = "0.25", default-features = false, features = ["loader", "rustc-demangle"] }
 anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
 object = { version = "0.36", default-features = false, features = ["read_core", "elf", "std"] }
 serialport = { version = "4.7", default-features = false, features = ["usbportinfo-interface"] }

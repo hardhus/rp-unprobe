@@ -56,16 +56,16 @@ fn parse(data: &[u8]) -> Result<Elf> {
     Ok(Elf { is_riscv, pages })
 }
 
-/// Picks the family ID from the `Model:` line on the BOOTSEL drive and the ELF architecture.
-pub fn family_for(data: &[u8], model: &str) -> Result<u32> {
-    if model.contains("RP2040") {
+/// Picks the family ID from the chip (BOOTSEL drive) and the ELF architecture.
+pub fn family_for(data: &[u8], rp2040: bool) -> Result<u32> {
+    let is_riscv = parse(data)?.is_riscv;
+    if rp2040 {
+        if is_riscv {
+            bail!("this is a RISC-V ELF, but the board is an RP2040 (Arm only)");
+        }
         return Ok(RP2040);
     }
-    Ok(if parse(data)?.is_riscv {
-        RP2350_RISCV
-    } else {
-        RP2350_ARM_S
-    })
+    Ok(if is_riscv { RP2350_RISCV } else { RP2350_ARM_S })
 }
 
 pub fn convert(data: &[u8], family: u32) -> Result<Vec<u8>> {
