@@ -1,6 +1,6 @@
 [package]
 name = "unprobe-cli"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Host tool for rp-unprobe: flash RP2040/RP2350 over BOOTSEL without a button and stream the USB log"

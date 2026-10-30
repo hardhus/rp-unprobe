@@ -57,7 +57,7 @@ enum Cmd {
     Uf2 {
         elf: PathBuf,
         out: Option<PathBuf>,
-        /// UF2 family ID (default: RP2350 ARM-S, or RISC-V for RISC-V ELFs; RP2040: e48bff56)
+        /// UF2 family ID (default: picked from the ELF: RP2040, RP2350 Arm or RP2350 RISC-V)
         #[arg(long, value_parser = parse_hex32)]
         family: Option<u32>,
     },
@@ -158,7 +158,7 @@ fn run(
 
     let family = match family {
         Some(f) => f,
-        None => uf2::family_for(&data, drive.rp2040)?,
+        None => uf2::family_for(&data, Some(drive.rp2040))?,
     };
     let image = uf2::convert(&data, family)?;
     eprintln!(
@@ -215,7 +215,7 @@ fn main() -> Result<()> {
             let data = std::fs::read(&elf)?;
             let family = match family {
                 Some(f) => f,
-                None => uf2::family_for(&data, false)?,
+                None => uf2::family_for(&data, None)?,
             };
             let out = out.unwrap_or_else(|| elf.with_extension("uf2"));
             std::fs::write(&out, uf2::convert(&data, family)?)?;

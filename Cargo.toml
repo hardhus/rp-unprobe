@@ -1,6 +1,6 @@
 [package]
 name = "rp-unprobe"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Probe-less development for RP2040/RP2350: USB serial logging, panic capture and BOOTSEL reboot in debug builds, zero cost in release"

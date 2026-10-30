@@ -144,7 +144,8 @@ To always have it, put it in the runner: `runner = "unprobe run --timestamp"`. T
 - **Ctrl+C** stops the monitor with exit code 0, so cargo doesn't print an error.
 - **HardFault reports** get the source location of the `PC`/`LR` addresses from the ELF's debug info. When the fault is inside library code (often inlined), the line in your own code is shown too.
 - Flashing is a plain file copy to the BOOTSEL drive, so it needs no admin rights, drivers or libusb.
-- The UF2 family ID comes from the board's `INFO_UF2.TXT` and the ELF: RP2040, RP2350 Arm or RP2350 RISC-V.
+- The UF2 family ID comes from the board's `INFO_UF2.TXT` and the ELF: RP2040, RP2350 Arm or RP2350 RISC-V. For `unprobe uf2`, from the ELF alone.
+- **Wrong board:** the Pico W and the Pico 2 W look alike. If the ELF was built for the other chip (it says which core it targets), `unprobe run` stops before flashing and tells you, instead of writing a firmware that can't start. `--family` skips this check.
 - BOOTSEL drives are looked up in drive letters on Windows, `/media/$USER`, `/run/media/$USER` and `/media` on Linux, and `/Volumes` on macOS.
 
 ## Configuration
